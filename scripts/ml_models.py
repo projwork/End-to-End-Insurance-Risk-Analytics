@@ -133,41 +133,53 @@ class InsuranceMLFramework:
         if 'RegistrationYear' in df.columns:
             current_year = pd.Timestamp.now().year
             df['VehicleAge'] = current_year - df['RegistrationYear']
-            df['VehicleAge'] = df['VehicleAge'].clip(0, 50)  # Cap at reasonable values
+            df['VehicleAge'] = df['VehicleAge'].clip(0, 50).astype(float)  # Ensure numeric type
         
-        # Date features
+        # Date features - ensure they are numeric
         if 'TransactionMonth' in df.columns:
-            df['Year'] = df['TransactionMonth'].dt.year
-            df['Month'] = df['TransactionMonth'].dt.month
-            df['Quarter'] = df['TransactionMonth'].dt.quarter
+            # Convert to datetime if not already
+            if not pd.api.types.is_datetime64_any_dtype(df['TransactionMonth']):
+                df['TransactionMonth'] = pd.to_datetime(df['TransactionMonth'])
+            
+            df['Year'] = df['TransactionMonth'].dt.year.astype(float)
+            df['Month'] = df['TransactionMonth'].dt.month.astype(float)
+            df['Quarter'] = df['TransactionMonth'].dt.quarter.astype(float)
         
         # Risk indicators
         df['HasClaim'] = (df['TotalClaims'] > 0).astype(int)
         df['LossRatio'] = df['TotalClaims'] / df['TotalPremium'].replace(0, np.nan)
-        df['LossRatio'] = df['LossRatio'].fillna(0).clip(0, 10)  # Cap extreme values
+        df['LossRatio'] = df['LossRatio'].fillna(0).clip(0, 10).astype(float)
         
         # Premium per sum insured ratio
         if 'SumInsured' in df.columns:
             df['PremiumRate'] = df['TotalPremium'] / df['SumInsured'].replace(0, np.nan)
-            df['PremiumRate'] = df['PremiumRate'].fillna(df['PremiumRate'].median())
+            df['PremiumRate'] = df['PremiumRate'].fillna(df['PremiumRate'].median()).astype(float)
         
         # Value estimation ratio
         if 'CustomValueEstimate' in df.columns:
             df['ValueRatio'] = df['SumInsured'] / df['CustomValueEstimate'].replace(0, np.nan)
-            df['ValueRatio'] = df['ValueRatio'].fillna(1).clip(0, 5)
+            df['ValueRatio'] = df['ValueRatio'].fillna(1).clip(0, 5).astype(float)
         
-        # Categorical feature engineering
+        # Categorical feature engineering - ensure string types
+        # Convert all original categorical columns to strings first
+        categorical_cols_original = ['Province', 'PostalCode', 'make', 'VehicleType', 
+                                   'Gender', 'MaritalStatus', 'Citizenship', 'LegalType']
+        
+        for col in categorical_cols_original:
+            if col in df.columns:
+                df[col] = df[col].astype(str).fillna('Unknown')
+        
         if 'PostalCode' in df.columns:
             # Group low-frequency postal codes
             postal_counts = df['PostalCode'].value_counts()
             low_freq_postal = postal_counts[postal_counts < 50].index
-            df['PostalCode_Grouped'] = df['PostalCode'].replace(low_freq_postal, 'Other')
+            df['PostalCode_Grouped'] = df['PostalCode'].replace(low_freq_postal, 'Other').astype(str)
         
         if 'make' in df.columns:
             # Group low-frequency vehicle makes
             make_counts = df['make'].value_counts()
             low_freq_makes = make_counts[make_counts < 100].index
-            df['make_Grouped'] = df['make'].replace(low_freq_makes, 'Other')
+            df['make_Grouped'] = df['make'].replace(low_freq_makes, 'Other').astype(str)
         
         print(f"   Engineered features created. Dataset shape: {df.shape}")
         return df
@@ -212,12 +224,27 @@ class InsuranceMLFramework:
         # Return selected features
         feature_df = df[selected_features].copy()
         
-        # Handle missing values in features
-        for col in feature_df.select_dtypes(include=[np.number]).columns:
-            feature_df[col] = feature_df[col].fillna(feature_df[col].median())
+        # Ensure proper data types
+        numerical_features = [
+            'VehicleAge', 'SumInsured', 'CustomValueEstimate', 'TotalPremium',
+            'PremiumRate', 'ValueRatio', 'Year', 'Month', 'Quarter'
+        ]
         
-        for col in feature_df.select_dtypes(include=['object']).columns:
-            feature_df[col] = feature_df[col].fillna('Unknown')
+        categorical_features = [
+            'Province', 'PostalCode_Grouped', 'make_Grouped', 'VehicleType',
+            'Gender', 'MaritalStatus', 'Citizenship', 'LegalType'
+        ]
+        
+        # Convert numerical columns to float
+        for col in numerical_features:
+            if col in feature_df.columns:
+                feature_df[col] = pd.to_numeric(feature_df[col], errors='coerce').astype(float)
+                feature_df[col] = feature_df[col].fillna(feature_df[col].median())
+        
+        # Convert categorical columns to string
+        for col in categorical_features:
+            if col in feature_df.columns:
+                feature_df[col] = feature_df[col].astype(str).fillna('Unknown')
         
         return feature_df
     
@@ -244,8 +271,23 @@ class InsuranceMLFramework:
         numerical_cols = X_train.select_dtypes(include=[np.number]).columns.tolist()
         categorical_cols = X_train.select_dtypes(include=['object', 'category']).columns.tolist()
         
+        # Additional type cleaning for categorical columns
+        for col in categorical_cols:
+            # Convert any remaining mixed types to strings
+            X_train[col] = X_train[col].astype(str)
+            X_test[col] = X_test[col].astype(str)
+        
         print(f"   Numerical features: {len(numerical_cols)}")
         print(f"   Categorical features: {len(categorical_cols)}")
+        
+        # Debug: Check for any problematic columns
+        for col in categorical_cols:
+            unique_types = set(type(x).__name__ for x in X_train[col].dropna().iloc[:100])
+            if len(unique_types) > 1:
+                print(f"   Warning: {col} has mixed types: {unique_types}")
+                # Force convert to string
+                X_train[col] = X_train[col].astype(str)
+                X_test[col] = X_test[col].astype(str)
         
         # Create preprocessing pipelines
         numerical_transformer = Pipeline(steps=[
@@ -279,6 +321,9 @@ class InsuranceMLFramework:
             list(preprocessor.named_transformers_['cat']
                  .named_steps['onehot'].get_feature_names_out(categorical_cols))
         )
+        
+        # Store feature names for later use
+        self.feature_names = feature_names
         
         # Convert to DataFrames for easier handling
         X_train_processed = pd.DataFrame(X_train_processed, columns=feature_names, index=X_train.index)
@@ -551,16 +596,24 @@ class InsuranceMLFramework:
         if hasattr(best_model, 'feature_importances_'):
             # Tree-based models
             importances = best_model.feature_importances_
-            feature_names = self.preprocessor.get_feature_names_out() if hasattr(self.preprocessor, 'get_feature_names_out') else [f'feature_{i}' for i in range(len(importances))]
+            feature_names = getattr(self, 'feature_names', [f'feature_{i}' for i in range(len(importances))])
             
         elif hasattr(best_model, 'coef_'):
             # Linear models
             importances = np.abs(best_model.coef_)
-            feature_names = self.preprocessor.get_feature_names_out() if hasattr(self.preprocessor, 'get_feature_names_out') else [f'feature_{i}' for i in range(len(importances))]
+            feature_names = getattr(self, 'feature_names', [f'feature_{i}' for i in range(len(importances))])
             
         else:
             print("❌ Model doesn't support feature importance extraction")
             return {}
+        
+        # Ensure feature names and importances have the same length
+        if len(feature_names) != len(importances):
+            print(f"⚠️  Mismatch: {len(feature_names)} feature names, {len(importances)} importance values")
+            min_length = min(len(feature_names), len(importances))
+            feature_names = feature_names[:min_length]
+            importances = importances[:min_length]
+            print(f"   Truncated to {min_length} features")
         
         # Create importance dataframe
         if len(importances.shape) > 1:
@@ -645,6 +698,15 @@ class InsuranceMLFramework:
             
             # Create SHAP summary
             feature_names = X_shap.columns.tolist()
+            
+            # Ensure consistent lengths for SHAP values
+            if len(feature_names) != shap_values.shape[1]:
+                print(f"⚠️  SHAP mismatch: {len(feature_names)} feature names, {shap_values.shape[1]} SHAP columns")
+                min_length = min(len(feature_names), shap_values.shape[1])
+                feature_names = feature_names[:min_length]
+                shap_values = shap_values[:, :min_length]
+                print(f"   Truncated to {min_length} features")
+            
             shap_importance = pd.DataFrame({
                 'Feature': feature_names,
                 'SHAP_Importance': np.abs(shap_values).mean(axis=0)
