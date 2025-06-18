@@ -7,3 +7,4 @@ scipy>=1.7.0
 jupyter>=1.0.0
 ipykernel>=6.0.0
 openpyxl>=3.0.0
+dvc>=3.60.0
