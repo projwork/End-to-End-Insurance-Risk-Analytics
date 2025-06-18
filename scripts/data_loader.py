@@ -16,27 +16,133 @@ warnings.filterwarnings('ignore')
 
 class InsuranceDataLoader:
     """
-    Data loader class for insurance risk analytics.
-    Handles data loading, preprocessing, and feature engineering.
+    A comprehensive data loader for insurance risk analytics with DVC integration.
+    Handles data loading, preprocessing, feature engineering, and version management.
     """
     
-    def __init__(self, data_path=None, sample_size=None):
+    def __init__(self, file_path=None, sample_size=None, random_state=42):
         """
         Initialize the data loader.
         
         Args:
-            data_path (str): Path to the data file
+            file_path (str): Path to the data file
             sample_size (int): Number of rows to sample
+            random_state (int): Random state for reproducibility
         """
-        self.data_path = data_path or DATA_PATH
+        self.file_path = file_path or DATA_PATH
         self.sample_size = sample_size or SAMPLE_SIZE
+        self.random_state = random_state or RANDOM_STATE
         self.df = None
         self._setup_pandas_options()
+        
+        # DVC integration
+        self.dvc_available = self._check_dvc_availability()
     
     def _setup_pandas_options(self):
         """Configure pandas display options."""
         for option, value in PANDAS_DISPLAY_OPTIONS.items():
             pd.set_option(option, value)
+    
+    def _check_dvc_availability(self):
+        """Check if DVC is available and configured"""
+        try:
+            import subprocess
+            result = subprocess.run(['dvc', 'version'], capture_output=True, text=True)
+            return result.returncode == 0
+        except:
+            return False
+    
+    def get_available_data_versions(self):
+        """Get list of available data versions tracked by DVC"""
+        if not self.dvc_available:
+            print("⚠️ DVC not available. Cannot list data versions.")
+            return []
+        
+        try:
+            import subprocess
+            result = subprocess.run(['dvc', 'list', '.', 'data'], capture_output=True, text=True)
+            if result.returncode == 0:
+                files = result.stdout.strip().split('\n')
+                dvc_files = [f for f in files if f.endswith('.dvc')]
+                return dvc_files
+            else:
+                print("⚠️ Could not list DVC files")
+                return []
+        except Exception as e:
+            print(f"⚠️ Error listing DVC files: {e}")
+            return []
+    
+    def load_data_version(self, version_file):
+        """Load a specific data version using DVC"""
+        if not self.dvc_available:
+            print("⚠️ DVC not available. Loading data directly.")
+            return self.load_data()
+        
+        try:
+            # Extract the actual data file name from .dvc file
+            data_file = version_file.replace('.dvc', '')
+            data_path = os.path.join('data', data_file)
+            
+            # Ensure data is pulled from DVC
+            import subprocess
+            subprocess.run(['dvc', 'pull', f'data/{version_file}'], check=True)
+            
+            print(f"📊 Loading data version: {data_file}")
+            
+            # Load the data
+            df = pd.read_csv(data_path, sep='|', 
+                           parse_dates=['TransactionMonth'])
+            
+            print(f"✅ Successfully loaded {len(df):,} records from {data_file}")
+            return df
+            
+        except Exception as e:
+            print(f"⚠️ Error loading DVC version {version_file}: {e}")
+            print("Falling back to default data loading...")
+            return self.load_data()
+    
+    def create_data_checkpoint(self, df, version_name, description=""):
+        """Create a new data version checkpoint with DVC"""
+        if not self.dvc_available:
+            print("⚠️ DVC not available. Cannot create checkpoint.")
+            return False
+        
+        try:
+            # Create the data file
+            checkpoint_path = f'data/checkpoint_{version_name}.txt'
+            df.to_csv(checkpoint_path, sep='|', index=False)
+            
+            # Add to DVC
+            import subprocess
+            subprocess.run(['dvc', 'add', checkpoint_path], check=True)
+            
+            print(f"✅ Created data checkpoint: {checkpoint_path}")
+            print(f"   Description: {description}")
+            print(f"   Records: {len(df):,}")
+            print(f"   Columns: {len(df.columns)}")
+            print("📝 Remember to commit the .dvc file to Git!")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error creating checkpoint: {e}")
+            return False
+    
+    def get_data_info(self, version_file=None):
+        """Get information about a specific data version"""
+        if version_file and self.dvc_available:
+            try:
+                import subprocess
+                result = subprocess.run(['dvc', 'get-url', f'data/{version_file}'], 
+                                      capture_output=True, text=True)
+                if result.returncode == 0:
+                    print(f"📊 DVC Version Info: {version_file}")
+                    # Additional DVC-specific info could be added here
+            except:
+                pass
+        
+        # Fall back to standard data info
+        return self.get_data_overview()
     
     def get_file_info(self):
         """
@@ -45,14 +151,14 @@ class InsuranceDataLoader:
         Returns:
             dict: File information including size and estimated records
         """
-        if not os.path.exists(self.data_path):
-            raise FileNotFoundError(f"Data file not found at {self.data_path}")
+        if not os.path.exists(self.file_path):
+            raise FileNotFoundError(f"Data file not found at {self.file_path}")
         
-        file_size_mb = os.path.getsize(self.data_path) / (1024 * 1024)
+        file_size_mb = os.path.getsize(self.file_path) / (1024 * 1024)
         
         return {
             'file_size_mb': file_size_mb,
-            'file_path': self.data_path,
+            'file_path': self.file_path,
             'sample_size': self.sample_size,
             'sample_percentage': (self.sample_size / (file_size_mb * 1024 * 20)) * 100
         }
@@ -68,11 +174,11 @@ class InsuranceDataLoader:
         Returns:
             pd.DataFrame: Loaded dataset
         """
-        print(f"Loading {self.sample_size:,} rows from {self.data_path}...")
+        print(f"Loading {self.sample_size:,} rows from {self.file_path}...")
         
         try:
             self.df = pd.read_csv(
-                self.data_path, 
+                self.file_path, 
                 delimiter=delimiter, 
                 nrows=self.sample_size,
                 encoding=encoding
