@@ -131,6 +131,68 @@ class DataQualityAssessor:
         self.quality_report['outliers'] = outlier_summary
         return outlier_summary
     
+    def generate_comprehensive_analysis(self):
+        """
+        Generate comprehensive data quality analysis.
+        
+        Returns:
+            dict: Complete quality report
+        """
+        print("🔍 Running comprehensive data quality analysis...")
+        
+        # Run all assessments
+        self.assess_missing_values()
+        self.assess_financial_variables()
+        self.detect_outliers()
+        
+        # Add additional checks
+        self.quality_report['data_consistency'] = self._check_data_consistency()
+        self.quality_report['temporal_consistency'] = self._check_temporal_consistency()
+        
+        print("✅ Comprehensive analysis completed!")
+        return self.quality_report
+    
+    def _check_data_consistency(self):
+        """Check for data consistency issues."""
+        consistency_issues = {}
+        
+        # Check if TotalClaims > TotalPremium (extreme loss ratios)
+        if 'TotalClaims' in self.df.columns and 'TotalPremium' in self.df.columns:
+            extreme_loss = self.df[self.df['TotalClaims'] > self.df['TotalPremium']]
+            consistency_issues['extreme_loss_ratios'] = {
+                'count': len(extreme_loss),
+                'percentage': len(extreme_loss) / len(self.df) * 100
+            }
+        
+        # Check for unrealistic registration years
+        if 'RegistrationYear' in self.df.columns:
+            current_year = datetime.now().year
+            unrealistic_years = self.df[
+                (self.df['RegistrationYear'] < 1900) | 
+                (self.df['RegistrationYear'] > current_year)
+            ]
+            consistency_issues['unrealistic_registration_years'] = {
+                'count': len(unrealistic_years),
+                'percentage': len(unrealistic_years) / len(self.df) * 100
+            }
+        
+        return consistency_issues
+    
+    def _check_temporal_consistency(self):
+        """Check temporal data consistency."""
+        temporal_issues = {}
+        
+        if 'TransactionMonth' in self.df.columns:
+            # Check for date range
+            date_range = {
+                'min_date': self.df['TransactionMonth'].min(),
+                'max_date': self.df['TransactionMonth'].max(),
+                'unique_months': self.df['TransactionMonth'].nunique()
+            }
+            temporal_issues['date_range'] = date_range
+        
+        return temporal_issues
+
     def print_quality_summary(self):
         """Print a summary of data quality findings."""
         if not self.quality_report:
@@ -166,6 +228,23 @@ class DataQualityAssessor:
             print(f"\n📊 OUTLIERS:")
             for var, outlier_info in self.quality_report['outliers'].items():
                 print(f"   {var}: {outlier_info['total_outliers']:,} ({outlier_info['outlier_percentage']:.1f}%)")
+        
+        # Data consistency summary
+        if 'data_consistency' in self.quality_report:
+            dc = self.quality_report['data_consistency']
+            print(f"\n⚠️  DATA CONSISTENCY:")
+            for issue, details in dc.items():
+                if details['count'] > 0:
+                    print(f"   {issue.replace('_', ' ').title()}: {details['count']:,} ({details['percentage']:.1f}%)")
+        
+        # Temporal consistency summary
+        if 'temporal_consistency' in self.quality_report:
+            tc = self.quality_report['temporal_consistency']
+            if 'date_range' in tc:
+                dr = tc['date_range']
+                print(f"\n📅 TEMPORAL CONSISTENCY:")
+                print(f"   Date range: {dr['min_date']} to {dr['max_date']}")
+                print(f"   Unique months: {dr['unique_months']}")
 
 def assess_data_quality(df):
     """

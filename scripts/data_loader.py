@@ -210,6 +210,20 @@ class InsuranceDataLoader:
         for category, info in column_info.items():
             if category != 'data_types':
                 print(f"   {category.title()}: {info['count']} columns")
+    
+    def load_and_prepare_data(self, delimiter='|', encoding='utf-8'):
+        """
+        Convenience method to load and preprocess data in one step.
+        
+        Args:
+            delimiter (str): Column delimiter
+            encoding (str): File encoding
+            
+        Returns:
+            pd.DataFrame: Loaded and preprocessed dataset
+        """
+        self.load_data(delimiter=delimiter, encoding=encoding)
+        return self.preprocess_data()
 
 def load_insurance_data(data_path=None, sample_size=None, preprocess=True):
     """

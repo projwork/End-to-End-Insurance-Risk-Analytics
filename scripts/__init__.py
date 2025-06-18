@@ -5,7 +5,7 @@ Modular approach for comprehensive insurance risk analysis.
 
 # Import all modules for easy access
 from .config import *
-from .data_loader import InsuranceDataLoader, load_and_prepare_data
+from .data_loader import InsuranceDataLoader, load_insurance_data
 from .data_quality import DataQualityAssessor, assess_data_quality
 from .statistical_analysis import StatisticalAnalyzer, analyze_statistics
 from .visualization import InsuranceVisualizer, create_visualizer
@@ -141,7 +141,7 @@ __all__ = [
     'BusinessAnalyzer',
     
     # Quick functions
-    'load_and_prepare_data',
+    'load_insurance_data',
     'assess_data_quality',
     'analyze_statistics',
     'create_visualizer',
